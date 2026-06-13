@@ -33,7 +33,7 @@ MAC_PACKAGE="${APP_NAME}-macOS-${MAC_ARCH}-${RELEASE_DATE}"
 
 mkdir -p "$RELEASE_DIR"
 
-echo "== Vektorrazor Release packen =="
+echo "== PDF-SplitExport Release packen =="
 echo "Datum:      $RELEASE_DATE"
 echo "Windows:    $WIN_ARCH"
 echo "Linux:      $LINUX_ARCH"
@@ -89,7 +89,7 @@ find_mac_zip() {
         echo "FEHLER: Keine macOS-ZIP in dist/ gefunden." >&2
         echo >&2
         echo "Lege den macOS-Build aus GitHub Actions z. B. hier ab:" >&2
-        echo "  dist/Vektorrazor-macOS-${MAC_ARCH}.zip" >&2
+        echo "  dist/PDF-SplitExport-macOS-${MAC_ARCH}.zip" >&2
         echo >&2
         echo "Oder gib die Datei explizit an:" >&2
         echo '  MAC_ZIP="dist/DEIN-MAC-BUILD.zip" ./pack_release.sh' >&2
