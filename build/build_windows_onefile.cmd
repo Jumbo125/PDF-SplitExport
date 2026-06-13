@@ -20,7 +20,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
 rmdir /s /q build_pyinstaller 2>nul
-rmdir /s /q dist 2>nul
+if exist dist\PDF-SplitExport.exe del /q dist\PDF-SplitExport.exe
 
 python -m PyInstaller ^
   --noconfirm ^
