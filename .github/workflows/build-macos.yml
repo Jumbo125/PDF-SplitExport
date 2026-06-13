@@ -16,7 +16,7 @@ jobs:
   build-macos:
     name: Build macOS app
     runs-on: macos-latest
-
+ 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,7 +40,7 @@ jobs:
             --onedir \
             --windowed \
             --noupx \
-            --name PDFTool \
+            --name PDF-SplitExport \
             --icon assets/app.ico \
             --add-data "assets:assets" \
             pdf_tool_ui.py
@@ -48,10 +48,10 @@ jobs:
       - name: Package app
         run: |
           cd dist
-          zip -r PDFTool-macOS.zip PDFTool.app
+          zip -r PDF-SplitExport-macOS.zip PDF-SplitExport.app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PDFTool-macOS
-          path: dist/PDFTool-macOS.zip
+          name: PDF-SplitExport-macOS
+          path: dist/PDF-SplitExport-macOS.zip
