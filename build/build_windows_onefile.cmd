@@ -28,7 +28,7 @@ python -m PyInstaller ^
   --onefile ^
   --windowed ^
   --noupx ^
-  --name PDFTool ^
+  --name PDF-SplitExport ^
   --icon assets\app.ico ^
   --version-file build\version_info.txt ^
   --add-data "assets;assets" ^
