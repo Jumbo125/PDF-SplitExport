@@ -1,0 +1,57 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "pdf_tool_ui.py"
+      - "requirements.txt"
+      - "assets/**"
+      - ".github/workflows/build-macos.yml"
+
+jobs:
+  build-macos:
+    name: Build macOS app
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Build app with PyInstaller
+        run: |
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --onedir \
+            --windowed \
+            --noupx \
+            --name PDFTool \
+            --icon assets/app.ico \
+            --add-data "assets:assets" \
+            pdf_tool_ui.py
+
+      - name: Package app
+        run: |
+          cd dist
+          zip -r PDFTool-macOS.zip PDFTool.app
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFTool-macOS
+          path: dist/PDFTool-macOS.zip

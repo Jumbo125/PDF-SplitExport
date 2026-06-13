@@ -1,0 +1,15 @@
+Alternative, falls Windows Defender beim Onefile-Build zu streng ist:
+
+python -m PyInstaller ^
+  --noconfirm ^
+  --clean ^
+  --onedir ^
+  --windowed ^
+  --noupx ^
+  --name PDFTool ^
+  --icon assets\app.ico ^
+  --version-file build\version_info.txt ^
+  --add-data "assets;assets" ^
+  pdf_tool_ui.py
+
+Hinweis: Onedir wird oft seltener als verdächtig eingestuft als Onefile, weil nichts zur Laufzeit in einen temporären _MEI-Ordner entpackt werden muss.

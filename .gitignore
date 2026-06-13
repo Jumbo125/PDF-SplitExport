@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.spec
+build_pyinstaller/
+dist/
+.venv/
+venv/
+.env
+*.log
+.DS_Store
+signieren/
