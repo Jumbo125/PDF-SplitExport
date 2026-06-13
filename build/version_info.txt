@@ -22,10 +22,10 @@ VSVersionInfo(
           StringStruct('CompanyName', 'Andreas Rottmann'),
           StringStruct('FileDescription', 'PDF-SplitExport - Split PDFs and export pages as images'),
           StringStruct('FileVersion', '1.0.0.0'),
-          StringStruct('InternalName', 'PDFTool'),
+          StringStruct('InternalName', 'PDF-SplitExport'),
           StringStruct('LegalCopyright', 'Copyright (C) 2026 Andreas Rottmann'),
           StringStruct('LegalTrademarks', 'AGPL-3.0-or-later'),
-          StringStruct('OriginalFilename', 'PDFTool.exe'),
+          StringStruct('OriginalFilename', 'PDF-SplitExport.exe'),
           StringStruct('ProductName', 'PDF-SplitExport'),
           StringStruct('ProductVersion', '1.0.0.0'),
           StringStruct('Comments', 'Author: Andreas Rottmann; License: AGPL-3.0-or-later')

@@ -125,7 +125,7 @@ build\build_windows_onefile.cmd
 Ausgabe:
 
 ```text
-dist\PDFTool.exe
+dist\DF-SplitExport.exe
 ```
 
 Bei Onefile-Builds kann es gelegentlich Antivirus-False-Positives geben. Das Build-Script verwendet `--noupx`, ein eigenes Icon und eine Versionsinfo. Für öffentliche Verteilung ist Code-Signing empfehlenswert.
@@ -248,7 +248,7 @@ build\build_windows_onefile.cmd
 Output:
 
 ```text
-dist\PDFTool.exe
+dist\PDF-SplitExport.exe
 ```
 
 Onefile builds may occasionally trigger antivirus false positives. The build script uses `--noupx`, a custom icon, and Windows version metadata. For public distribution, code signing is recommended.

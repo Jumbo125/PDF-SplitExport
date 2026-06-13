@@ -106,7 +106,7 @@ build\build_windows_onefile.cmd
 Ausgabe:
 
 ```text
-dist\PDFTool.exe
+dist\PDF-SplitExport.exe
 ```
 
 Hinweis: Bei PyInstaller-Onefile kann es gelegentlich zu Antivirus-False-Positives kommen. Das Script verwendet deshalb `--noupx`, eine klare Versionsinfo und ein Icon. Für Veröffentlichung ist Code-Signing am besten.

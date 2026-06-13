@@ -11,3 +11,5 @@ venv/
 *.log
 .DS_Store
 signieren/
+.venv_linux/
+

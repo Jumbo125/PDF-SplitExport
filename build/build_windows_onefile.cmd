@@ -43,6 +43,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo Fertig: dist\PDFTool.exe
+echo Fertig: dist\PDF-SplitExport.exe
 echo.
 pause
