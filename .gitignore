@@ -12,4 +12,4 @@ venv/
 .DS_Store
 signieren/
 .venv_linux/
-
+release/

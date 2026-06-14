@@ -262,6 +262,105 @@ def parse_split_pages(text: str, total_pages: int) -> list[int]:
     return sorted(set(pages))
 
 
+def parse_single_page_or_range(text: str, total_pages: int) -> list[int]:
+    """
+    Erlaubt:
+    - 7
+    - 7-12
+    """
+    value = text.strip()
+    if not value:
+        raise ValueError("Bitte Seite X oder Seite X-X eingeben.")
+
+    if "-" in value:
+        parts = [part.strip() for part in value.split("-", 1)]
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError("Bereich muss im Format X-X angegeben werden.")
+        start_page = parse_positive_int(parts[0], "Von-Seite")
+        end_page = parse_positive_int(parts[1], "Bis-Seite")
+        if start_page > end_page:
+            raise ValueError("Von-Seite darf nicht größer als Bis-Seite sein.")
+        if end_page > total_pages:
+            raise ValueError(f"Die PDF hat nur {total_pages} Seiten.")
+        return list(range(start_page, end_page + 1))
+
+    page = parse_positive_int(value, "Seite")
+    if page > total_pages:
+        raise ValueError(f"Die PDF hat nur {total_pages} Seiten.")
+    return [page]
+
+
+def parse_extract_pages(text: str, total_pages: int) -> list[int]:
+    """
+    Erlaubt:
+    - 7
+    - 7-12
+    - 2,5-7,10
+    """
+    value = text.strip()
+    if not value:
+        raise ValueError("Bitte Seite X, Seite X-X oder mehrere Bereiche mit Komma eingeben.")
+
+    pages: list[int] = []
+    for part in value.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        pages.extend(parse_single_page_or_range(token, total_pages))
+
+    if not pages:
+        raise ValueError("Bitte mindestens eine gültige Seite oder einen gültigen Bereich eingeben.")
+
+    return pages
+
+
+def parse_extract_groups(text: str, total_pages: int) -> list[list[int]]:
+    """
+    Erlaubt:
+    - 7                -> [[7]]
+    - 7-12             -> [[7, 8, ..., 12]]
+    - 2,5-7,10         -> [[2], [5, 6, 7], [10]]
+    """
+    value = text.strip()
+    if not value:
+        raise ValueError("Bitte Seite X, Seite X-X oder mehrere Bereiche mit Komma eingeben.")
+
+    groups: list[list[int]] = []
+    for part in value.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        groups.append(parse_single_page_or_range(token, total_pages))
+
+    if not groups:
+        raise ValueError("Bitte mindestens eine gültige Seite oder einen gültigen Bereich eingeben.")
+
+    return groups
+
+
+def parse_merge_pages(text: str, total_pages: int) -> list[int]:
+    """
+    Erlaubt:
+    - 3+5+8
+    - 3+5-7+10
+    """
+    value = text.strip()
+    if not value:
+        raise ValueError("Bitte mindestens eine Seite für den Merger eingeben, z. B. 3+5+8.")
+
+    pages: list[int] = []
+    for part in value.split("+"):
+        token = part.strip()
+        if not token:
+            continue
+        pages.extend(parse_single_page_or_range(token, total_pages))
+
+    if not pages:
+        raise ValueError("Bitte mindestens eine gültige Seite für den Merger eingeben.")
+
+    return pages
+
+
 def build_ranges(split_pages: list[int], total_pages: int) -> list[tuple[int, int, str]]:
     """
     Baut fortlaufende Seitenbereiche mit 0-basierten Indizes.
@@ -280,6 +379,24 @@ def build_ranges(split_pages: list[int], total_pages: int) -> list[tuple[int, in
         ranges.append((start_index, total_pages, label))
 
     return ranges
+
+
+def build_extract_range(pages: list[int]) -> tuple[int, int, str]:
+    start_page = pages[0]
+    end_page = pages[-1]
+    if start_page == end_page:
+        label = f"Seite {start_page}"
+    else:
+        label = f"Seite {start_page} bis {end_page}"
+    return (start_page - 1, end_page, label)
+
+
+def build_extract_label(pages: list[int]) -> str:
+    start_page = pages[0]
+    end_page = pages[-1]
+    if start_page == end_page:
+        return f"Seite {start_page}"
+    return f"Seite {start_page} bis {end_page}"
 
 
 def write_pdf_range_pypdf(
@@ -318,6 +435,48 @@ def write_pdf_range_fitz(
     try:
         for i in range(start_index, end_index):
             out.insert_pdf(src, from_page=i, to_page=i)
+            if progress_callback:
+                progress_callback()
+        out.save(output_path, garbage=4, deflate=True)
+    finally:
+        out.close()
+        src.close()
+
+
+def write_pdf_selected_pages_pypdf(
+    reader: PdfReader,
+    pages: Iterable[int],
+    output_path: str,
+    progress_callback: Callable[[], None] | None = None,
+):
+    """
+    Schreibt gezielt ausgewählte 1-basierte Seiten in genau eine neue PDF.
+    """
+    writer = PdfWriter()
+    for page_number in pages:
+        writer.add_page(reader.pages[page_number - 1])
+        if progress_callback:
+            progress_callback()
+    with open(output_path, "wb") as f:
+        writer.write(f)
+
+
+def write_pdf_selected_pages_fitz(
+    source_path: str,
+    options: PdfAccessOptions,
+    pages: Iterable[int],
+    output_path: str,
+    progress_callback: Callable[[], None] | None = None,
+):
+    """
+    Fallback mit PyMuPDF für frei ausgewählte Seiten.
+    """
+    src = open_fitz_document(source_path, options)
+    out = fitz.open()
+    try:
+        for page_number in pages:
+            index = page_number - 1
+            out.insert_pdf(src, from_page=index, to_page=index)
             if progress_callback:
                 progress_callback()
         out.save(output_path, garbage=4, deflate=True)
@@ -439,10 +598,16 @@ class PdfToolApp:
         self.pdf_password_var = tk.StringVar()
         self.try_without_password_var = tk.BooleanVar(value=True)
         self.use_fitz_split_fallback_var = tk.BooleanVar(value=True)
+        self.pdf_page_count_var = tk.StringVar(value="Seitenanzahl: -")
+        self.pdf_input_preview_var = tk.StringVar(value="Vorschau: -")
+        self.pdf_input_validation_var = tk.StringVar(value="Eingabe: wartet")
 
         # Split-Tab
         self.output_base_var = tk.StringVar()
+        self.pdf_mode_var = tk.StringVar(value="split")
         self.split_pages_var = tk.StringVar()
+        self.extract_pages_var = tk.StringVar()
+        self.merge_pages_var = tk.StringVar()
 
         # Bild-Export-Tab
         self.image_output_folder_var = tk.StringVar()
@@ -612,6 +777,8 @@ class PdfToolApp:
             foreground="#666666",
         ).pack(anchor="w", pady=(4, 0))
 
+        ttk.Label(inner, textvariable=self.pdf_page_count_var, foreground="#333333").pack(anchor="w", pady=(8, 0))
+
     def build_split_tab(self):
         ttk.Label(
             self.split_tab_content,
@@ -661,6 +828,111 @@ class PdfToolApp:
         self.split_log_text = tk.Text(self.split_tab_content, height=10, wrap="word")
         self.split_log_text.pack(fill="x", pady=(6, 0))
         self.log_split("Bereit. PDF auswählen, Speicher-Basisdatei wählen und Split-Seiten eingeben.")
+
+    def build_split_tab(self):
+        ttk.Label(
+            self.split_tab_content,
+            text="PDF-Seiten als PDF aufteilen, extrahieren oder neu zusammensetzen",
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w", pady=(0, 10))
+
+        ttk.Label(
+            self.split_tab_content,
+            text="Ohne Bildumwandlung und ohne OCR. Text bleibt markierbar, wenn die Quelle echten Text enthält.",
+        ).pack(anchor="w", pady=(0, 12))
+
+        self.build_shared_pdf_selector(self.split_tab_content, self.log_split)
+
+        mode_frame = ttk.LabelFrame(self.split_tab_content, text="PDF-Modus")
+        mode_frame.pack(fill="x", pady=6)
+        mode_inner = ttk.Frame(mode_frame, padding=8)
+        mode_inner.pack(fill="x")
+
+        ttk.Radiobutton(
+            mode_inner,
+            text="Splitter: 10,25 -> 1-10 / 11-25 / 26-Ende",
+            variable=self.pdf_mode_var,
+            value="split",
+            command=self.update_pdf_mode_ui,
+        ).pack(anchor="w", pady=2)
+        ttk.Radiobutton(
+            mode_inner,
+            text="Extraktor: 7, 7-12 oder 2,5-7,10",
+            variable=self.pdf_mode_var,
+            value="extract",
+            command=self.update_pdf_mode_ui,
+        ).pack(anchor="w", pady=2)
+        ttk.Radiobutton(
+            mode_inner,
+            text="Merger: 3+5+8 oder 3+5-7+10",
+            variable=self.pdf_mode_var,
+            value="merge",
+            command=self.update_pdf_mode_ui,
+        ).pack(anchor="w", pady=2)
+
+        self.pdf_mode_detail_frame = ttk.Frame(mode_inner)
+        self.pdf_mode_detail_frame.pack(fill="x", pady=(10, 0))
+
+        self.output_frame = ttk.Frame(self.split_tab_content)
+        self.output_label_var = tk.StringVar(value="Speicher-Basisdatei:")
+        ttk.Label(self.output_frame, textvariable=self.output_label_var).pack(anchor="w")
+        output_row = ttk.Frame(self.output_frame)
+        output_row.pack(fill="x")
+        ttk.Entry(output_row, textvariable=self.output_base_var).pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.output_button = ttk.Button(output_row, text="Speicherpfad wählen", command=self.select_output_base)
+        self.output_button.pack(side="right")
+
+        self.split_input_frame = ttk.Frame(self.pdf_mode_detail_frame)
+        ttk.Label(self.split_input_frame, text="Split nach Seite X, mehrere mit Komma trennen:").pack(anchor="w")
+        ttk.Entry(self.split_input_frame, textvariable=self.split_pages_var).pack(fill="x")
+        ttk.Label(
+            self.split_input_frame,
+            text="Beispiel: 10,25  ->  Seite 1-10 / Seite 11-25 / Seite 26-Ende",
+            foreground="#555555",
+        ).pack(anchor="w", pady=(3, 0))
+
+        self.extract_input_frame = ttk.Frame(self.pdf_mode_detail_frame)
+        ttk.Label(self.extract_input_frame, text="Seite, Bereich oder mehrere Bereiche extrahieren:").pack(anchor="w")
+        ttk.Entry(self.extract_input_frame, textvariable=self.extract_pages_var).pack(fill="x")
+        ttk.Label(
+            self.extract_input_frame,
+            text="Beispiel: 7 oder 7-12 -> eine PDF | 2,5-7,10 -> mehrere einzelne PDFs",
+            foreground="#555555",
+        ).pack(anchor="w", pady=(3, 0))
+
+        self.merge_input_frame = ttk.Frame(self.pdf_mode_detail_frame)
+        ttk.Label(self.merge_input_frame, text="Seiten für Merger mit + verbinden:").pack(anchor="w")
+        ttk.Entry(self.merge_input_frame, textvariable=self.merge_pages_var).pack(fill="x")
+        ttk.Label(
+            self.merge_input_frame,
+            text="Beispiel: 3+5+8 oder 3+5-7+10  ->  erzeugt genau eine neue PDF in dieser Reihenfolge",
+            foreground="#555555",
+        ).pack(anchor="w", pady=(3, 0))
+
+        ttk.Label(self.pdf_mode_detail_frame, textvariable=self.pdf_input_preview_var, foreground="#333333").pack(anchor="w", pady=(6, 0))
+        ttk.Label(self.pdf_mode_detail_frame, textvariable=self.pdf_input_validation_var, foreground="#666666").pack(anchor="w", pady=(2, 0))
+        self.output_frame.pack(fill="x", pady=(10, 6))
+
+        button_frame = ttk.Frame(self.split_tab_content)
+        button_frame.pack(fill="x", pady=(16, 8))
+        self.split_start_button = ttk.Button(button_frame, text="PDF-Aktion starten", command=self.start_split_thread)
+        self.split_start_button.pack(side="left")
+
+        progress_frame = ttk.Frame(self.split_tab_content)
+        progress_frame.pack(fill="x", pady=(8, 4))
+        ttk.Label(progress_frame, text="Fortschritt:").pack(anchor="w")
+        self.split_progress = ttk.Progressbar(progress_frame, orient="horizontal", mode="determinate")
+        self.split_progress.pack(fill="x", pady=(4, 0))
+
+        self.split_status_var = tk.StringVar(value="Bereit.")
+        ttk.Label(self.split_tab_content, textvariable=self.split_status_var).pack(anchor="w", pady=(8, 4))
+
+        self.split_log_text = tk.Text(self.split_tab_content, height=10, wrap="word")
+        self.split_log_text.pack(fill="x", pady=(6, 0))
+        for var in (self.split_pages_var, self.extract_pages_var, self.merge_pages_var, self.pdf_mode_var):
+            var.trace_add("write", self.on_pdf_input_changed)
+        self.update_pdf_mode_ui()
+        self.log_split("Bereit. PDF auswählen, Modus wählen, Speicherpfad setzen und Seitenangabe eingeben.")
 
     def build_image_tab(self):
         ttk.Label(
@@ -830,9 +1102,92 @@ class PdfToolApp:
         self.output_base_var.set(os.path.join(folder, f"{name}_split.pdf"))
         self.image_output_folder_var.set(folder)
         self.image_prefix_var.set(name)
+        self.set_default_pdf_output_path()
 
         log_func(f"PDF geladen: {path}")
         self.read_page_count_to_ui(log_func)
+
+    def run_split(self):
+        try:
+            self.root.after(0, lambda: self.split_start_button.config(state="disabled"))
+            self.root.after(0, lambda: self.split_status_var.set("Starte..."))
+
+            input_pdf = self.input_pdf_var.get().strip()
+            output_base = self.output_base_var.get().strip()
+            mode = self.get_pdf_mode()
+
+            if not input_pdf or not os.path.isfile(input_pdf):
+                raise ValueError("Bitte zuerst eine gültige PDF-Datei auswählen.")
+            if not output_base:
+                raise ValueError("Bitte einen Speicherpfad wählen.")
+            output_folder = os.path.dirname(output_base)
+            if output_folder and not os.path.isdir(output_folder):
+                raise ValueError("Der Speicherordner existiert nicht.")
+
+            total_pages = self.get_total_pdf_pages(input_pdf)
+            if total_pages < 1:
+                raise ValueError("Die PDF enthält keine Seiten.")
+
+            pages_or_split_points, detail_log = self.get_pdf_pages_for_mode(mode, total_pages)
+            extract_groups: list[list[int]] | None = None
+
+            if mode == "split":
+                if total_pages < 2:
+                    raise ValueError("Die PDF muss für den Splitter mindestens 2 Seiten haben.")
+                ranges = build_ranges(pages_or_split_points, total_pages)
+                progress_steps = total_pages
+            elif mode == "extract":
+                extract_groups = parse_extract_groups(self.extract_pages_var.get().strip(), total_pages)
+                ranges = [build_extract_range(group) for group in extract_groups]
+                progress_steps = sum(len(group) for group in extract_groups)
+            else:
+                ranges = [build_extract_range(pages_or_split_points)]
+                progress_steps = len(pages_or_split_points)
+
+            self.root.after(0, lambda: self.set_split_progress_max(progress_steps))
+            self.root.after(0, lambda: self.log_split(""))
+            self.root.after(0, lambda: self.log_split(f"Starte Modus: {mode}"))
+            self.root.after(0, lambda: self.log_split(f"Seitenanzahl: {total_pages}"))
+            self.root.after(0, lambda: self.log_split(detail_log))
+
+            if mode == "split":
+                self.root.after(0, lambda: self.log_split(f"Anzahl Ausgabedateien: {len(ranges)}"))
+                try:
+                    created_files = self._split_with_pypdf(input_pdf, output_base, ranges, total_pages)
+                except Exception as pypdf_error:
+                    if not self.use_fitz_split_fallback_var.get():
+                        raise
+                    self.root.after(0, lambda e=pypdf_error: self.log_split(f"pypdf fehlgeschlagen, versuche PyMuPDF-Fallback: {e}"))
+                    self.root.after(0, lambda: self.set_split_progress_max(progress_steps))
+                    created_files = self._split_with_fitz(input_pdf, output_base, ranges)
+            else:
+                output_count = len(extract_groups) if mode == "extract" and extract_groups is not None else 1
+                self.root.after(0, lambda c=output_count: self.log_split(f"Anzahl Ausgabedateien: {c}"))
+                try:
+                    if mode == "extract" and extract_groups is not None and len(extract_groups) > 1:
+                        created_files = self._multiple_selected_pypdf(input_pdf, output_base, extract_groups, mode)
+                    else:
+                        created_files = self._single_pdf_with_pypdf(input_pdf, output_base, pages_or_split_points, mode)
+                except Exception as pypdf_error:
+                    if not self.use_fitz_split_fallback_var.get():
+                        raise
+                    self.root.after(0, lambda e=pypdf_error: self.log_split(f"pypdf fehlgeschlagen, versuche PyMuPDF-Fallback: {e}"))
+                    self.root.after(0, lambda: self.set_split_progress_max(progress_steps))
+                    if mode == "extract" and extract_groups is not None and len(extract_groups) > 1:
+                        created_files = self._multiple_selected_fitz(input_pdf, output_base, extract_groups, mode)
+                    else:
+                        created_files = self._single_pdf_with_fitz(input_pdf, output_base, pages_or_split_points, mode)
+
+            self.root.after(0, lambda: self.split_status_var.set("Fertig."))
+            self.root.after(0, lambda: self.log_split("Fertig."))
+            self.root.after(0, lambda: messagebox.showinfo("Fertig", f"PDF-Aktion abgeschlossen.\n\nErstellte Dateien: {len(created_files)}"))
+
+        except Exception as e:
+            self.root.after(0, lambda: self.split_status_var.set("Fehler."))
+            self.root.after(0, lambda err=e: self.log_split(f"FEHLER: {err}"))
+            self.root.after(0, lambda err=e: messagebox.showerror("Fehler", str(err)))
+        finally:
+            self.root.after(0, lambda: self.split_start_button.config(state="normal"))
 
     def read_page_count_to_ui(self, log_func: Callable[[str], None]):
         path = self.input_pdf_var.get().strip()
@@ -863,6 +1218,138 @@ class PdfToolApp:
     def log_image(self, text: str):
         self.image_log_text.insert("end", text + "\n")
         self.image_log_text.see("end")
+
+    def update_pdf_mode_ui(self):
+        mode = self.pdf_mode_var.get()
+
+        self.split_input_frame.pack_forget()
+        self.extract_input_frame.pack_forget()
+        self.merge_input_frame.pack_forget()
+
+        if mode == "split":
+            self.output_label_var.set("Speicher-Basisdatei:")
+            self.split_input_frame.pack(fill="x", pady=6)
+        elif mode == "extract":
+            self.output_label_var.set("Ziel-Datei für Extraktor:")
+            self.extract_input_frame.pack(fill="x", pady=6)
+        else:
+            self.output_label_var.set("Ziel-Datei für Merger:")
+            self.merge_input_frame.pack(fill="x", pady=6)
+
+        self.set_default_pdf_output_path()
+        self.update_pdf_input_feedback()
+
+    def set_default_pdf_output_path(self):
+        input_pdf = self.input_pdf_var.get().strip()
+        if not input_pdf:
+            return
+
+        folder = os.path.dirname(input_pdf)
+        filename = os.path.basename(input_pdf)
+        name, _ = os.path.splitext(filename)
+        mode = self.pdf_mode_var.get()
+
+        if mode == "split":
+            output_name = f"{name}_split.pdf"
+        elif mode == "extract":
+            output_name = f"{name}_extract.pdf"
+        else:
+            output_name = f"{name}_merge.pdf"
+
+        current_output = self.output_base_var.get().strip()
+        if not current_output or os.path.dirname(current_output) == folder:
+            self.output_base_var.set(os.path.join(folder, output_name))
+
+    def get_pdf_mode(self) -> str:
+        mode = self.pdf_mode_var.get().strip()
+        if mode not in {"split", "extract", "merge"}:
+            raise ValueError("Bitte Splitter, Extraktor oder Merger auswählen.")
+        return mode
+
+    def get_total_pdf_pages(self, input_pdf: str) -> int:
+        try:
+            reader_probe = PdfReader(input_pdf)
+            if not try_decrypt_pypdf(reader_probe, self.access_options()):
+                raise ValueError("pypdf konnte nicht öffnen")
+            return len(reader_probe.pages)
+        except Exception:
+            doc = open_fitz_document(input_pdf, self.access_options())
+            total_pages = doc.page_count
+            doc.close()
+            return total_pages
+
+    def get_pdf_pages_for_mode(self, mode: str, total_pages: int) -> tuple[list[int], str]:
+        if mode == "split":
+            split_pages = parse_split_pages(self.split_pages_var.get().strip(), total_pages)
+            return split_pages, f"Split-Punkte: {', '.join(map(str, split_pages))}"
+
+        if mode == "extract":
+            pages = parse_extract_pages(self.extract_pages_var.get().strip(), total_pages)
+            return pages, f"Extraktor-Seiten: {pages}"
+
+        pages = parse_merge_pages(self.merge_pages_var.get().strip(), total_pages)
+        return pages, f"Merger-Seiten: {pages}"
+
+    def on_pdf_input_changed(self, *_args):
+        self.update_pdf_input_feedback()
+
+    def get_known_total_pages(self) -> int | None:
+        value = self.pdf_page_count_var.get().strip()
+        prefix = "Seitenanzahl:"
+        if not value.startswith(prefix):
+            return None
+        raw = value[len(prefix):].strip()
+        if raw.isdigit():
+            return int(raw)
+        return None
+
+    def update_pdf_input_feedback(self):
+        mode = self.pdf_mode_var.get().strip()
+        total_pages = self.get_known_total_pages()
+
+        if mode == "split":
+            raw = self.split_pages_var.get().strip()
+            hint = "z. B. 10,25"
+        elif mode == "extract":
+            raw = self.extract_pages_var.get().strip()
+            hint = "z. B. 7, 7-12 oder 2,5-7,10"
+        else:
+            raw = self.merge_pages_var.get().strip()
+            hint = "z. B. 3+5+8 oder 3+5-7+10"
+
+        if not raw:
+            self.pdf_input_preview_var.set(f"Vorschau: {hint}")
+            self.pdf_input_validation_var.set("Eingabe: wartet")
+            return
+
+        if total_pages is None:
+            self.pdf_input_preview_var.set(f"Vorschau: {raw}")
+            self.pdf_input_validation_var.set("Eingabe: Seitenanzahl laden, dann wird geprüft")
+            return
+
+        try:
+            if mode == "split":
+                split_pages = parse_split_pages(raw, total_pages)
+                ranges = build_ranges(split_pages, total_pages)
+                preview = " | ".join(label for _start, _end, label in ranges)
+            elif mode == "extract":
+                groups = parse_extract_groups(raw, total_pages)
+                if len(groups) == 1:
+                    preview = ", ".join(map(str, groups[0]))
+                else:
+                    preview = " | ".join(
+                        f"Datei {index}: {build_extract_label(group)}"
+                        for index, group in enumerate(groups, start=1)
+                    )
+            else:
+                pages = parse_merge_pages(raw, total_pages)
+                preview = ", ".join(map(str, pages))
+
+            self.pdf_input_preview_var.set(f"Vorschau: {preview}")
+            self.pdf_input_validation_var.set("Eingabe: gültig")
+        except Exception as e:
+            self.pdf_input_preview_var.set(f"Vorschau: {raw}")
+            self.pdf_input_validation_var.set(f"Eingabe: {e}")
 
     # ------------------------------------------------------------
     # Split Tab Aktionen
@@ -970,6 +1457,275 @@ class PdfToolApp:
             self.root.after(0, lambda: self.split_status_var.set("Fertig."))
             self.root.after(0, lambda: self.log_split("Fertig."))
             self.root.after(0, lambda: messagebox.showinfo("Fertig", f"PDF-Splitting abgeschlossen.\n\nErstellte Dateien: {len(created_files)}"))
+
+        except Exception as e:
+            self.root.after(0, lambda: self.split_status_var.set("Fehler."))
+            self.root.after(0, lambda err=e: self.log_split(f"FEHLER: {err}"))
+            self.root.after(0, lambda err=e: messagebox.showerror("Fehler", str(err)))
+        finally:
+            self.root.after(0, lambda: self.split_start_button.config(state="normal"))
+
+    def select_output_base(self):
+        mode = self.get_pdf_mode()
+        if mode == "split":
+            title = "Speicher-Basisdatei wählen"
+        elif mode == "extract":
+            title = "Zieldatei für Extraktor wählen"
+        else:
+            title = "Zieldatei für Merger wählen"
+
+        path = filedialog.asksaveasfilename(title=title, defaultextension=".pdf", filetypes=[("PDF-Dateien", "*.pdf")])
+        if path:
+            self.output_base_var.set(path)
+            self.log_split(f"Speicherpfad: {path}")
+
+    def _split_with_pypdf(self, input_pdf: str, output_base: str, ranges: Iterable[tuple[int, int, str]], total_pages: int) -> list[str]:
+        reader = PdfReader(input_pdf)
+        if not try_decrypt_pypdf(reader, self.access_options()):
+            raise ValueError("PDF konnte mit pypdf nicht entsperrt werden.")
+
+        created_files: list[str] = []
+        for output_number, (start_index, end_index, label) in enumerate(ranges, start=1):
+            output_path = make_numbered_pdf_path(output_base, output_number)
+            self.root.after(0, lambda n=output_number, l=label: self.log_split(f"Erstelle Datei {n}: {l}"))
+            write_pdf_range_pypdf(reader, start_index, end_index, output_path, self.increment_split_progress)
+            created_files.append(output_path)
+            self.root.after(0, lambda p=output_path: self.log_split(f"Erstellt: {p}"))
+        return created_files
+
+    def _single_pdf_with_pypdf(self, input_pdf: str, output_path: str, pages: list[int], mode: str) -> list[str]:
+        reader = PdfReader(input_pdf)
+        if not try_decrypt_pypdf(reader, self.access_options()):
+            raise ValueError("PDF konnte mit pypdf nicht entsperrt werden.")
+
+        mode_label = "Extraktor" if mode == "extract" else "Merger"
+        self.root.after(0, lambda: self.log_split(f"{mode_label} erstellt Datei: {output_path}"))
+        write_pdf_selected_pages_pypdf(reader, pages, output_path, self.increment_split_progress)
+        self.root.after(0, lambda: self.log_split(f"Erstellt: {output_path}"))
+        return [output_path]
+
+    def _multiple_selected_pypdf(self, input_pdf: str, output_base: str, groups: list[list[int]], mode: str) -> list[str]:
+        reader = PdfReader(input_pdf)
+        if not try_decrypt_pypdf(reader, self.access_options()):
+            raise ValueError("PDF konnte mit pypdf nicht entsperrt werden.")
+
+        mode_label = "Extraktor" if mode == "extract" else "Merger"
+        created_files: list[str] = []
+        for output_number, pages in enumerate(groups, start=1):
+            output_path = make_numbered_pdf_path(output_base, output_number)
+            label = build_extract_label(pages)
+            self.root.after(0, lambda n=output_number, l=label, m=mode_label: self.log_split(f"{m} erstellt Datei {n}: {l}"))
+            write_pdf_selected_pages_pypdf(reader, pages, output_path, self.increment_split_progress)
+            created_files.append(output_path)
+            self.root.after(0, lambda p=output_path: self.log_split(f"Erstellt: {p}"))
+        return created_files
+
+    def _split_with_fitz(self, input_pdf: str, output_base: str, ranges: Iterable[tuple[int, int, str]]) -> list[str]:
+        created_files: list[str] = []
+        for output_number, (start_index, end_index, label) in enumerate(ranges, start=1):
+            output_path = make_numbered_pdf_path(output_base, output_number)
+            self.root.after(0, lambda n=output_number, l=label: self.log_split(f"Fallback erstellt Datei {n}: {l}"))
+            write_pdf_range_fitz(input_pdf, self.access_options(), start_index, end_index, output_path, self.increment_split_progress)
+            created_files.append(output_path)
+            self.root.after(0, lambda p=output_path: self.log_split(f"Erstellt: {p}"))
+        return created_files
+
+    def _single_pdf_with_fitz(self, input_pdf: str, output_path: str, pages: list[int], mode: str) -> list[str]:
+        mode_label = "Extraktor" if mode == "extract" else "Merger"
+        self.root.after(0, lambda: self.log_split(f"{mode_label}-Fallback erstellt Datei: {output_path}"))
+        write_pdf_selected_pages_fitz(input_pdf, self.access_options(), pages, output_path, self.increment_split_progress)
+        self.root.after(0, lambda: self.log_split(f"Erstellt: {output_path}"))
+        return [output_path]
+
+    def _multiple_selected_fitz(self, input_pdf: str, output_base: str, groups: list[list[int]], mode: str) -> list[str]:
+        mode_label = "Extraktor" if mode == "extract" else "Merger"
+        created_files: list[str] = []
+        for output_number, pages in enumerate(groups, start=1):
+            output_path = make_numbered_pdf_path(output_base, output_number)
+            label = build_extract_label(pages)
+            self.root.after(0, lambda n=output_number, l=label, m=mode_label: self.log_split(f"{m}-Fallback erstellt Datei {n}: {l}"))
+            write_pdf_selected_pages_fitz(input_pdf, self.access_options(), pages, output_path, self.increment_split_progress)
+            created_files.append(output_path)
+            self.root.after(0, lambda p=output_path: self.log_split(f"Erstellt: {p}"))
+        return created_files
+
+    def run_split(self):
+        try:
+            self.root.after(0, lambda: self.split_start_button.config(state="disabled"))
+            self.root.after(0, lambda: self.split_status_var.set("Starte..."))
+
+            input_pdf = self.input_pdf_var.get().strip()
+            output_base = self.output_base_var.get().strip()
+            mode = self.get_pdf_mode()
+
+            if not input_pdf or not os.path.isfile(input_pdf):
+                raise ValueError("Bitte zuerst eine gültige PDF-Datei auswählen.")
+            if not output_base:
+                raise ValueError("Bitte einen Speicherpfad wählen.")
+            output_folder = os.path.dirname(output_base)
+            if output_folder and not os.path.isdir(output_folder):
+                raise ValueError("Der Speicherordner existiert nicht.")
+
+            total_pages = self.get_total_pdf_pages(input_pdf)
+            if total_pages < 1:
+                raise ValueError("Die PDF enthält keine Seiten.")
+
+            pages_or_split_points, detail_log = self.get_pdf_pages_for_mode(mode, total_pages)
+
+            if mode == "split":
+                if total_pages < 2:
+                    raise ValueError("Die PDF muss für den Splitter mindestens 2 Seiten haben.")
+                ranges = build_ranges(pages_or_split_points, total_pages)
+                progress_steps = total_pages
+            else:
+                ranges = [build_extract_range(pages_or_split_points)]
+                progress_steps = len(pages_or_split_points)
+
+            self.root.after(0, lambda: self.set_split_progress_max(progress_steps))
+            self.root.after(0, lambda: self.log_split(""))
+            self.root.after(0, lambda: self.log_split(f"Starte Modus: {mode}"))
+            self.root.after(0, lambda: self.log_split(f"Seitenanzahl: {total_pages}"))
+            self.root.after(0, lambda: self.log_split(detail_log))
+
+            if mode == "split":
+                self.root.after(0, lambda: self.log_split(f"Anzahl Ausgabedateien: {len(ranges)}"))
+                try:
+                    created_files = self._split_with_pypdf(input_pdf, output_base, ranges, total_pages)
+                except Exception as pypdf_error:
+                    if not self.use_fitz_split_fallback_var.get():
+                        raise
+                    self.root.after(0, lambda e=pypdf_error: self.log_split(f"pypdf fehlgeschlagen, versuche PyMuPDF-Fallback: {e}"))
+                    self.root.after(0, lambda: self.set_split_progress_max(progress_steps))
+                    created_files = self._split_with_fitz(input_pdf, output_base, ranges)
+            else:
+                self.root.after(0, lambda: self.log_split("Anzahl Ausgabedateien: 1"))
+                try:
+                    created_files = self._single_pdf_with_pypdf(input_pdf, output_base, pages_or_split_points, mode)
+                except Exception as pypdf_error:
+                    if not self.use_fitz_split_fallback_var.get():
+                        raise
+                    self.root.after(0, lambda e=pypdf_error: self.log_split(f"pypdf fehlgeschlagen, versuche PyMuPDF-Fallback: {e}"))
+                    self.root.after(0, lambda: self.set_split_progress_max(progress_steps))
+                    created_files = self._single_pdf_with_fitz(input_pdf, output_base, pages_or_split_points, mode)
+
+            self.root.after(0, lambda: self.split_status_var.set("Fertig."))
+            self.root.after(0, lambda: self.log_split("Fertig."))
+            self.root.after(0, lambda: messagebox.showinfo("Fertig", f"PDF-Aktion abgeschlossen.\n\nErstellte Dateien: {len(created_files)}"))
+
+        except Exception as e:
+            self.root.after(0, lambda: self.split_status_var.set("Fehler."))
+            self.root.after(0, lambda err=e: self.log_split(f"FEHLER: {err}"))
+            self.root.after(0, lambda err=e: messagebox.showerror("Fehler", str(err)))
+        finally:
+            self.root.after(0, lambda: self.split_start_button.config(state="normal"))
+
+    def read_page_count_to_ui(self, log_func: Callable[[str], None]):
+        path = self.input_pdf_var.get().strip()
+        if not path or not os.path.isfile(path):
+            self.pdf_page_count_var.set("Seitenanzahl: -")
+            self.update_pdf_input_feedback()
+            return
+
+        try:
+            reader = PdfReader(path)
+            if not try_decrypt_pypdf(reader, self.access_options()):
+                self.pdf_page_count_var.set("Seitenanzahl: gesperrt")
+                self.update_pdf_input_feedback()
+                log_func("PDF ist verschlüsselt. Seitenanzahl eventuell erst nach Passwort-Eingabe verfügbar.")
+                return
+            total_pages = len(reader.pages)
+            self.pdf_page_count_var.set(f"Seitenanzahl: {total_pages}")
+            self.update_pdf_input_feedback()
+            log_func(f"Seitenanzahl: {total_pages}")
+            self.range_end_var.set(str(total_pages))
+        except Exception as e:
+            try:
+                doc = open_fitz_document(path, self.access_options())
+                total_pages = doc.page_count
+                doc.close()
+                self.pdf_page_count_var.set(f"Seitenanzahl: {total_pages}")
+                self.update_pdf_input_feedback()
+                log_func(f"Seitenanzahl: {total_pages}")
+                self.range_end_var.set(str(total_pages))
+            except Exception:
+                self.pdf_page_count_var.set("Seitenanzahl: unbekannt")
+                self.update_pdf_input_feedback()
+                log_func(f"PDF konnte noch nicht gelesen werden: {e}")
+
+    def run_split(self):
+        try:
+            self.root.after(0, lambda: self.split_start_button.config(state="disabled"))
+            self.root.after(0, lambda: self.split_status_var.set("Starte..."))
+
+            input_pdf = self.input_pdf_var.get().strip()
+            output_base = self.output_base_var.get().strip()
+            mode = self.get_pdf_mode()
+
+            if not input_pdf or not os.path.isfile(input_pdf):
+                raise ValueError("Bitte zuerst eine gültige PDF-Datei auswählen.")
+            if not output_base:
+                raise ValueError("Bitte einen Speicherpfad wählen.")
+            output_folder = os.path.dirname(output_base)
+            if output_folder and not os.path.isdir(output_folder):
+                raise ValueError("Der Speicherordner existiert nicht.")
+
+            total_pages = self.get_total_pdf_pages(input_pdf)
+            if total_pages < 1:
+                raise ValueError("Die PDF enthält keine Seiten.")
+
+            pages_or_split_points, detail_log = self.get_pdf_pages_for_mode(mode, total_pages)
+            extract_groups: list[list[int]] | None = None
+
+            if mode == "split":
+                if total_pages < 2:
+                    raise ValueError("Die PDF muss für den Splitter mindestens 2 Seiten haben.")
+                ranges = build_ranges(pages_or_split_points, total_pages)
+                progress_steps = total_pages
+            elif mode == "extract":
+                extract_groups = parse_extract_groups(self.extract_pages_var.get().strip(), total_pages)
+                ranges = [build_extract_range(group) for group in extract_groups]
+                progress_steps = sum(len(group) for group in extract_groups)
+            else:
+                ranges = [build_extract_range(pages_or_split_points)]
+                progress_steps = len(pages_or_split_points)
+
+            self.root.after(0, lambda: self.set_split_progress_max(progress_steps))
+            self.root.after(0, lambda: self.log_split(""))
+            self.root.after(0, lambda: self.log_split(f"Starte Modus: {mode}"))
+            self.root.after(0, lambda: self.log_split(f"Seitenanzahl: {total_pages}"))
+            self.root.after(0, lambda: self.log_split(detail_log))
+
+            if mode == "split":
+                self.root.after(0, lambda: self.log_split(f"Anzahl Ausgabedateien: {len(ranges)}"))
+                try:
+                    created_files = self._split_with_pypdf(input_pdf, output_base, ranges, total_pages)
+                except Exception as pypdf_error:
+                    if not self.use_fitz_split_fallback_var.get():
+                        raise
+                    self.root.after(0, lambda e=pypdf_error: self.log_split(f"pypdf fehlgeschlagen, versuche PyMuPDF-Fallback: {e}"))
+                    self.root.after(0, lambda: self.set_split_progress_max(progress_steps))
+                    created_files = self._split_with_fitz(input_pdf, output_base, ranges)
+            else:
+                output_count = len(extract_groups) if mode == "extract" and extract_groups is not None else 1
+                self.root.after(0, lambda c=output_count: self.log_split(f"Anzahl Ausgabedateien: {c}"))
+                try:
+                    if mode == "extract" and extract_groups is not None and len(extract_groups) > 1:
+                        created_files = self._multiple_selected_pypdf(input_pdf, output_base, extract_groups, mode)
+                    else:
+                        created_files = self._single_pdf_with_pypdf(input_pdf, output_base, pages_or_split_points, mode)
+                except Exception as pypdf_error:
+                    if not self.use_fitz_split_fallback_var.get():
+                        raise
+                    self.root.after(0, lambda e=pypdf_error: self.log_split(f"pypdf fehlgeschlagen, versuche PyMuPDF-Fallback: {e}"))
+                    self.root.after(0, lambda: self.set_split_progress_max(progress_steps))
+                    if mode == "extract" and extract_groups is not None and len(extract_groups) > 1:
+                        created_files = self._multiple_selected_fitz(input_pdf, output_base, extract_groups, mode)
+                    else:
+                        created_files = self._single_pdf_with_fitz(input_pdf, output_base, pages_or_split_points, mode)
+
+            self.root.after(0, lambda: self.split_status_var.set("Fertig."))
+            self.root.after(0, lambda: self.log_split("Fertig."))
+            self.root.after(0, lambda: messagebox.showinfo("Fertig", f"PDF-Aktion abgeschlossen.\n\nErstellte Dateien: {len(created_files)}"))
 
         except Exception as e:
             self.root.after(0, lambda: self.split_status_var.set("Fehler."))
