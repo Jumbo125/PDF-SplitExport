@@ -1,7 +1,7 @@
 """
 PDF-SplitExport UI
 Author: Andreas Rottmann
-Version: 1.0.0
+Version: 2.0.0
 License: AGPL-3.0-or-later
 
 Funktionen:
@@ -34,7 +34,7 @@ import fitz  # PyMuPDF
 from PIL import Image, ImageTk
 
 APP_NAME = "PDF-SplitExport"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 APP_AUTHOR = "Andreas Rottmann"
 APP_LICENSE = "AGPL-3.0-or-later"
 
