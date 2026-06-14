@@ -3,7 +3,7 @@ set -euo pipefail
 
 # PDF-SplitExport Linux Onefile Build
 # Author: Andreas Rottmann
-# Version: 1.0.0
+# Version: 2.0.0
 # License: AGPL-3.0-or-later
 #
 # Hinweise gegen typische False-Positive-/Build-Probleme:

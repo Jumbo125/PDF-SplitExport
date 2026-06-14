@@ -3,7 +3,7 @@ setlocal
 
 REM PDF-SplitExport Windows Onefile Build
 REM Author: Andreas Rottmann
-REM Version: 1.0.0
+REM Version: 2.0.0
 REM License: AGPL-3.0-or-later
 REM
 REM Hinweise gegen typische False-Positive-Probleme:

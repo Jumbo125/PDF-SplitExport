@@ -1,44 +1,91 @@
-# PDF-SplitExport 1.0 - lokale Anleitung
+# PDF-SplitExport 2.0.0 - lokale Anleitung
 
 **Author:** Andreas Rottmann  
 **License:** AGPL-3.0-or-later
 
-Dieses kleine Tkinter-Tool hat zwei Hauptfunktionen:
+PDF-SplitExport 2.0 hat jetzt vier klare Hauptfunktionen:
 
-1. **PDF splitten** ohne OCR und ohne Bildumwandlung
-2. **PDF-Seiten als Bild exportieren** mit DPI, Format und Qualität/Kompression
+1. `Splitter` für fortlaufende PDF-Bereiche
+2. `Extraktor` für einzelne Seiten, Bereiche oder mehrere getrennte Ausgaben
+3. `Merger` für frei kombinierte Seitenreihenfolgen
+4. `Bildexport` für PDF-Seiten als PNG, JPG, TIFF, GIF oder WEBP
 
-## Installation für Python
+## Installation
 
 ```bash
 pip install -r requirements.txt
-```
-
-Start:
-
-```bash
 python pdf_tool_ui.py
 ```
 
-## Reiter 1: PDF splitten
+## PDF-Bereich
 
-Beispiel:
+Im PDF-Reiter gibt es drei Modi:
+
+### 1. Splitter
+
+Eingabe:
 
 ```text
-Split-Seiten: 10,25
+10,25
 ```
 
 Ergebnis:
 
 ```text
-output_1.pdf = Seite 1 bis 10
-output_2.pdf = Seite 11 bis 25
-output_3.pdf = Seite 26 bis Ende
+Datei 1 = Seite 1 bis 10
+Datei 2 = Seite 11 bis 25
+Datei 3 = Seite 26 bis Ende
 ```
 
-Die PDF wird nicht gerendert. Die Seiten werden als echte PDF-Seiten kopiert. Wenn der Text in der Original-PDF markierbar war, bleibt er normalerweise markierbar.
+### 2. Extraktor
 
-## Reiter 2: Seiten als Bild exportieren
+Eine einzelne Ausgabedatei:
+
+```text
+7
+7-12
+```
+
+Mehrere Ausgabedateien:
+
+```text
+2,5-7,10
+```
+
+Ergebnis:
+
+```text
+Datei 1 = Seite 2
+Datei 2 = Seite 5 bis 7
+Datei 3 = Seite 10
+```
+
+Wichtig: Beim Extraktor bedeutet Komma getrennte Einzelausgaben. Das ist absichtlich anders als beim Merger.
+
+### 3. Merger
+
+Eingabe:
+
+```text
+3+5+8
+3+5-7+10
+```
+
+Ergebnis:
+
+```text
+Eine neue PDF mit genau dieser Reihenfolge
+```
+
+## Live-Hilfe im PDF-Reiter
+
+Die Oberfläche zeigt jetzt direkt:
+
+- die Seitenanzahl der geladenen PDF
+- eine Live-Vorschau der Eingabe
+- eine direkte Validierung, falls das Format ungültig ist
+
+## Bildexport
 
 Unterstützte Formate:
 
@@ -48,7 +95,7 @@ Unterstützte Formate:
 - GIF
 - WEBP
 
-Auswahlmöglichkeiten:
+Seitenauswahl:
 
 - Aktuelle Seite
 - Seite X bis X
@@ -73,40 +120,36 @@ Platzhalter:
 
 ## Qualität / Kompression
 
-Je nach Format wird die Eingabe anders interpretiert:
-
 ```text
 PNG  = Kompression 0-9
 JPG  = Qualität 1-100
 WEBP = Qualität 0-100
 GIF  = Farben 2-256
-TIFF = Qualität nur bei TIFF-Kompression jpeg relevant
+TIFF = Kompression: tiff_deflate, lzw, jpeg oder none
 ```
 
 ## Passwortgeschützte PDFs
 
-Du kannst ein PDF-Passwort eingeben.
+Du kannst ein PDF-Passwort eingeben. Zusätzlich kann die App versuchen, eine geschützte PDF ohne Passwort zu öffnen, wenn sie technisch ohne echtes User-Passwort zugänglich ist.
 
-Zusätzlich gibt es die Checkbox:
+Die App knackt keine Passwörter und umgeht keine echte Verschlüsselung.
 
-```text
-Geschützte PDF ohne Passwort versuchen, wenn technisch möglich / leeres User-Passwort
-```
+## Build
 
-Das knackt keine Passwörter. Es hilft nur bei PDFs, die zwar Berechtigungs-/Owner-Schutz oder ein leeres User-Passwort haben, technisch aber ohne Passwort geöffnet werden können.
-
-## Windows EXE bauen
-
-Im Projektordner ausführen:
+Windows:
 
 ```cmd
 build\build_windows_onefile.cmd
 ```
 
-Ausgabe:
+Linux:
 
-```text
-dist\PDF-SplitExport.exe
+```bash
+build/build_linux_onefile.sh
 ```
 
-Hinweis: Bei PyInstaller-Onefile kann es gelegentlich zu Antivirus-False-Positives kommen. Das Script verwendet deshalb `--noupx`, eine klare Versionsinfo und ein Icon. Für Veröffentlichung ist Code-Signing am besten.
+macOS:
+
+```text
+.github/workflows/build-macos.yml
+```
