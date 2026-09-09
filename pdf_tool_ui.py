@@ -146,6 +146,13 @@ def parse_positive_int(value: str, name: str) -> int:
     return number
 
 
+def parse_optional_positive_int(value: str, name: str) -> int | None:
+    value = value.strip()
+    if value == "":
+        return None
+    return parse_positive_int(value, name)
+
+
 def parse_int_in_range(value: str, name: str, minimum: int, maximum: int) -> int:
     number = parse_positive_int(value, name)
     if number < minimum or number > maximum:
@@ -515,10 +522,31 @@ def parse_export_pages(total_pages: int, mode: str, current_page_text: str, rang
     raise ValueError("Bitte einen Exportmodus auswählen.")
 
 
-def render_pdf_page_to_image(doc: fitz.Document, page_number: int, dpi: int) -> Image.Image:
+def render_pdf_page_to_image(
+    doc: fitz.Document,
+    page_number: int,
+    dpi: int,
+    target_width: int | None = None,
+    target_height: int | None = None,
+) -> Image.Image:
     page = doc.load_page(page_number - 1)
-    zoom = dpi / 72
-    matrix = fitz.Matrix(zoom, zoom)
+
+    if target_width is not None or target_height is not None:
+        page_width_pt = float(page.rect.width)
+        page_height_pt = float(page.rect.height)
+
+        if target_width is not None and target_height is not None:
+            matrix = fitz.Matrix(target_width / page_width_pt, target_height / page_height_pt)
+        elif target_width is not None:
+            scale = target_width / page_width_pt
+            matrix = fitz.Matrix(scale, scale)
+        else:
+            scale = target_height / page_height_pt
+            matrix = fitz.Matrix(scale, scale)
+    else:
+        zoom = dpi / 72
+        matrix = fitz.Matrix(zoom, zoom)
+
     pix = page.get_pixmap(matrix=matrix, alpha=False)
     return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
@@ -529,6 +557,7 @@ def save_image(
     file_type: str,
     quality_value: int,
     tiff_compression: str,
+    dpi: int | None = None,
 ):
     """
     Speichert Bild mit formatabhängiger Quality/Compression.
@@ -541,21 +570,25 @@ def save_image(
     """
     file_type = file_type.upper()
 
+    save_kwargs: dict[str, object] = {}
+    if dpi is not None:
+        save_kwargs["dpi"] = (dpi, dpi)
+
     if file_type == "PNG":
         compression = max(0, min(9, int(quality_value)))
-        image.save(output_path, format="PNG", optimize=True, compress_level=compression)
+        image.save(output_path, format="PNG", optimize=True, compress_level=compression, **save_kwargs)
         return
 
     if file_type == "JPG":
         q = max(1, min(100, int(quality_value)))
         image = image.convert("RGB")
-        image.save(output_path, format="JPEG", quality=q, optimize=True, progressive=True)
+        image.save(output_path, format="JPEG", quality=q, optimize=True, progressive=True, **save_kwargs)
         return
 
     if file_type == "WEBP":
         q = max(0, min(100, int(quality_value)))
         image = image.convert("RGB")
-        image.save(output_path, format="WEBP", quality=q, method=6)
+        image.save(output_path, format="WEBP", quality=q, method=6, **save_kwargs)
         return
 
     if file_type == "GIF":
@@ -570,13 +603,13 @@ def save_image(
         if compression not in allowed:
             raise ValueError("TIFF-Kompression muss none, tiff_deflate, lzw oder jpeg sein.")
         if compression == "none":
-            image.save(output_path, format="TIFF")
+            image.save(output_path, format="TIFF", **save_kwargs)
         elif compression == "jpeg":
             q = max(1, min(100, int(quality_value)))
             image = image.convert("RGB")
-            image.save(output_path, format="TIFF", compression="jpeg", quality=q)
+            image.save(output_path, format="TIFF", compression="jpeg", quality=q, **save_kwargs)
         else:
-            image.save(output_path, format="TIFF", compression=compression)
+            image.save(output_path, format="TIFF", compression=compression, **save_kwargs)
         return
 
     raise ValueError(f"Nicht unterstütztes Format: {file_type}")
@@ -613,6 +646,8 @@ class PdfToolApp:
         self.image_output_folder_var = tk.StringVar()
         self.image_prefix_var = tk.StringVar()
         self.image_dpi_var = tk.StringVar(value="300")
+        self.image_width_var = tk.StringVar()
+        self.image_height_var = tk.StringVar()
         self.image_format_var = tk.StringVar(value="PNG")
         self.quality_var = tk.StringVar(value="6")
         self.tiff_compression_var = tk.StringVar(value="tiff_deflate")
@@ -957,6 +992,14 @@ class PdfToolApp:
         dpi_row.pack(fill="x", pady=4)
         ttk.Label(dpi_row, text="DPI:", width=24).pack(side="left")
         ttk.Entry(dpi_row, textvariable=self.image_dpi_var, width=12).pack(side="left")
+
+        fixed_size_row = ttk.Frame(settings_inner)
+        fixed_size_row.pack(fill="x", pady=4)
+        ttk.Label(fixed_size_row, text="Fixe Größe (px):", width=24).pack(side="left")
+        ttk.Entry(fixed_size_row, textvariable=self.image_width_var, width=10).pack(side="left")
+        ttk.Label(fixed_size_row, text="x", width=3).pack(side="left")
+        ttk.Entry(fixed_size_row, textvariable=self.image_height_var, width=10).pack(side="left")
+        ttk.Label(fixed_size_row, text="leer = nur DPI / eine Angabe = Seitenverhältnis beibehalten", foreground="#555555").pack(side="left", padx=(8, 0))
 
         format_row = ttk.Frame(settings_inner)
         format_row.pack(fill="x", pady=4)
@@ -1800,10 +1843,22 @@ class PdfToolApp:
             output_folder = self.image_output_folder_var.get().strip()
             prefix = self.image_prefix_var.get().strip()
             dpi = parse_int_in_range(self.image_dpi_var.get(), "DPI", 30, 1200)
+            fixed_width = parse_optional_positive_int(self.image_width_var.get(), "Breite in Pixel")
+            fixed_height = parse_optional_positive_int(self.image_height_var.get(), "Höhe in Pixel")
             file_type = self.image_format_var.get().strip().upper()
             quality_value = self.validate_quality_value(file_type)
             tiff_compression = self.tiff_compression_var.get().strip()
             mode = self.get_export_mode()
+
+            if fixed_width is None and fixed_height is None:
+                fixed_width = None
+                fixed_height = None
+            elif fixed_width is not None and fixed_height is not None:
+                pass
+            elif fixed_width is not None:
+                fixed_height = None
+            elif fixed_height is not None:
+                fixed_width = None
 
             if not input_pdf or not os.path.isfile(input_pdf):
                 raise ValueError("Bitte zuerst eine gültige PDF-Datei auswählen.")
@@ -1833,6 +1888,8 @@ class PdfToolApp:
             self.root.after(0, lambda: self.log_image("Starte Bildexport..."))
             self.root.after(0, lambda: self.log_image(f"Seitenanzahl PDF: {total_pages}"))
             self.root.after(0, lambda: self.log_image(f"DPI: {dpi}"))
+            if fixed_width is not None or fixed_height is not None:
+                self.root.after(0, lambda: self.log_image(f"Fixe Größe: {fixed_width or 'auto'} x {fixed_height or 'auto'} px"))
             self.root.after(0, lambda: self.log_image(f"Format: {file_type}"))
             self.root.after(0, lambda: self.log_image(f"Qualität/Kompression: {quality_value}"))
             if file_type == "TIFF":
@@ -1843,8 +1900,8 @@ class PdfToolApp:
             for seq_number, page_number in enumerate(pages_to_export, start=1):
                 output_path = make_image_output_path(output_folder, prefix, page_number, seq_number, ext)
                 self.root.after(0, lambda p=page_number: self.log_image(f"Exportiere Seite {p}..."))
-                image = render_pdf_page_to_image(doc, page_number, dpi)
-                save_image(image, output_path, file_type, quality_value, tiff_compression)
+                image = render_pdf_page_to_image(doc, page_number, dpi, target_width=fixed_width, target_height=fixed_height)
+                save_image(image, output_path, file_type, quality_value, tiff_compression, dpi=dpi)
                 created_files.append(output_path)
                 self.increment_image_progress()
                 self.root.after(0, lambda p=output_path: self.log_image(f"Erstellt: {p}"))
